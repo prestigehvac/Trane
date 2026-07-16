@@ -99,15 +99,25 @@ if df_raw is not None:
         for _, metric, original_col in system_cols:
             sys_df[metric] = df_raw[original_col]
         
-        # Guard against a missing "Ton" column key by finding the closest match
-        ton_col_key = "Ton"
-        if "Ton" not in sys_df.columns:
+        # Cleanly find the tonnage column even if it has a long prefix
+        ton_col_key = None
+        for col_name in sys_df.columns:
+            col_lower = str(col_name).lower()
+            # Look for columns ending in "/ton" or exactly named "ton"
+            if col_lower.endswith("/ton") or col_lower == "ton":
+                ton_col_key = col_name
+                break
+
+        # If not found, fallback to anything containing "ton" (but avoiding "conditioner")
+        if not ton_col_key:
             for col_name in sys_df.columns:
-                if "ton" in col_name.lower():
+                col_lower = str(col_name).lower()
+                if "ton" in col_lower and "conditioner" not in col_lower:
                     ton_col_key = col_name
                     break
 
-        if ton_col_key in sys_df.columns:
+        # Check if we successfully resolved a tonnage column key
+        if ton_col_key is not None:
             # Clean empty values on the tonnage column
             sys_df = sys_df.dropna(subset=[ton_col_key])
             
@@ -181,7 +191,7 @@ if df_raw is not None:
                     indoor_cost = prices[1] if len(prices) > 1 else 0.0
                     coil_cost = prices[2] if len(prices) > 2 else 0.0
                     
-                    # Find the Total column safely
+                    # Find the Total column safely without hard indexing
                     total_col_key = None
                     for item in system_cols:
                         if item[1] == "Total":
