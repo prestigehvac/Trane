@@ -8,31 +8,31 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- FORCE THE CONFIG.TOML COLOR SCHEME VIA CSS ---
+# --- FORCE THE PALETTE FROM CONFIG.TOML ---
 st.markdown(
     """
     <style>
-    /* Main Page Background (backgroundColor) */
+    /* Main App Background (backgroundColor) */
     .stApp {
         background-color: #1c0b7c !important;
     }
     
-    /* Main Page Text & Headings (textColor) */
+    /* Main Page Texts (textColor) */
     .stApp, .stApp p, .stApp h1, .stApp h2, .stApp h3, .stApp span, .stApp label {
         color: #fbfbfc !important;
     }
     
-    /* Sidebar and Input Backgrounds (secondaryBackgroundColor) */
+    /* Sidebar Background (secondaryBackgroundColor) */
     [data-testid="stSidebar"] {
         background-color: #1c65f8 !important;
     }
     
-    /* Sidebar Text (textColor) */
+    /* Sidebar Texts (textColor) */
     [data-testid="stSidebar"] * {
         color: #fbfbfc !important;
     }
     
-    /* Input Boxes, Dropdowns, and Selectboxes (White Background with Dark Text for legibility) */
+    /* Selectboxes and input dropdowns inside sidebar & page (Light background for high legibility) */
     [data-testid="stSidebar"] div[data-baseweb="input"] input, 
     [data-testid="stSidebar"] div[role="combobox"],
     div[data-baseweb="select"] > div {
@@ -40,7 +40,7 @@ st.markdown(
         color: #1c0b7c !important;
     }
     
-    /* Primary Color Accents (primaryColor) - Slider Handle & Track */
+    /* Primary Accent Color (primaryColor) - Slider Track & Handle */
     div.stSlider > div[data-baseweb="slider"] > div > div {
         background: #f70015 !important;
     }
@@ -70,7 +70,7 @@ df_raw = load_excel_data()
 
 if df_raw is not None:
     # Handle the merged cells in row 3 (Category Row)
-    header_row_category = df_raw.iloc[3].ffill()  # Propagates the category across merged columns
+    header_row_category = df_raw.iloc[3].ffill()
     header_row_metric = df_raw.iloc[4]
 
     parsed_columns = []
@@ -112,7 +112,7 @@ if df_raw is not None:
         except ValueError:
             return s
 
-    # Find the correct Tonnage, Outdoor (Condenser), and Total Price columns from Trane sheet
+    # Find columns
     ton_col = None
     condenser_col = None
     total_col = None
@@ -134,7 +134,7 @@ if df_raw is not None:
         if parsed and parsed not in all_tons:
             all_tons.append(parsed)
 
-    # Sidebar Pricing matching Amana app variables and sidebar look
+    # Sidebar Pricing
     st.sidebar.header("Pricing Calculator")
     markup_multiplier = st.sidebar.slider("Markup Multiplier", 1.0, 3.0, 1.8, step=0.05)
     flat_labor = st.sidebar.number_input("Labor & Material Cost ($)", value=1700)
@@ -151,7 +151,7 @@ if df_raw is not None:
         if not df_filtered_ton.empty:
             condensers_list = df_filtered_ton[condenser_col].dropna().unique()
             
-            # Format dropdown display matching Amana style (Model — Price)
+            # Format dropdown display
             display_options = []
             for cond in condensers_list:
                 row_match = df_filtered_ton[df_filtered_ton[condenser_col] == cond]
@@ -175,7 +175,7 @@ if df_raw is not None:
             display_df["Retail Equipment Price"] = display_df["Retail Equipment Price"].map('${:,.2f}'.format)
             display_df["Total Customer Investment"] = display_df["Total Customer Investment"].map('${:,.2f}'.format)
 
-            # Clean up headers for the table display (removes the long category prefix)
+            # Clean up headers for the table display
             final_columns = {}
             for col in display_df.columns:
                 parts = col.split("|")
