@@ -1,216 +1,178 @@
 import streamlit as st
 import pandas as pd
-import re
+import numpy as np
 
 # Set Page Config
 st.set_page_config(
     page_title="Prestige HVAC Quote Helper - Trane Edition",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_icon="https://prestigehvac.com/wp-content/uploads/2021/04/cropped-prestige-hvac-logo-1-32x32.png",
+    layout="wide"
 )
 
-# Custom Styling
+# Custom CSS for styling (using the correct unsafe_allow_html parameter and removing generic emojis)
 st.markdown("""
-    <style>
-    .metric-card {
+<style>
+    .main {
         background-color: #f8f9fa;
+    }
+    .stMetric {
+        background-color: #ffffff;
         padding: 15px;
         border-radius: 10px;
-        border: 1px solid #dee2e6;
-        margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border-left: 5px solid #E31B23;
     }
-    .stButton>button {
-        width: 100%;
+    .system-card {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin-bottom: 20px;
+        border: 1px solid #e9ecef;
     }
-    </style>
-""", unsafe_style_url="")
+</style>
+""", unsafe_allow_html=True)
 
-# Helper to load all sheet names
-def get_all_sheets(file_url_or_path):
-    try:
-        xls = pd.ExcelFile(file_url_or_path)
-        return xls.sheet_names
-    except Exception as e:
-        st.error(f"Error reading Excel file structure: {e}")
-        return []
-
-# Helper to clean currency values
-def clean_price(val):
-    if pd.isna(val) or val == "" or str(val).strip().lower() in ["n/a", "none", "-"]:
-        return 0.0
-    try:
-        if isinstance(val, (int, float)):
-            return float(val)
-        cleaned = re.sub(r'[^\d\.\-]', '', str(val))
-        return float(cleaned) if cleaned else 0.0
-    except ValueError:
-        return 0.0
-
-# Helper to extract Tonnage from headers or cell content
-def parse_tonnage_from_text(text):
-    if not text or pd.isna(text):
-        return None
-    text_str = str(text).lower().strip()
-    # Match patterns like "3 ton", "3.5 ton", "3.5t"
-    match = re.search(r'(\d+(?:\.\d+)?)\s*(?:ton|t\b)', text_str)
-    if match:
-        try:
-            return float(match.group(1))
-        except ValueError:
-            pass
-    return None
-
-# Load Excel data from the configured file ID
-@st.cache_data(ttl=600)
-def load_hvac_sheet(file_url, sheet_name):
-    try:
-        df = pd.read_excel(file_url, sheet_name=sheet_name)
-        return df
-    except Exception as e:
-        st.error(f"Error loading sheet '{sheet_name}': {e}")
-        return None
-
-# Process the loaded sheet to map columns and structured matchups
-def process_matchups(df):
-    if df is None or df.empty:
-        return []
-
-    # Strip column headers
-    df.columns = [str(c).strip() for c in df.columns]
+# Helper function to parse sections from the Trane Excel sheet
+@st.cache_data
+def load_and_parse_data():
+    file_path = "Trane Matchup 2026.xlsx"
+    df_raw = pd.read_excel(file_path, header=None)
     
-    # Try to find target system column keys
-    col_mapping = {}
-    for col in df.columns:
-        col_lower = col.lower()
-        if "outdoor" in col_lower or "model" in col_lower or "system" in col_lower:
-            col_mapping["system_model"] = col
-        elif "price" in col_lower and "system" in col_lower:
-            col_mapping["system_price"] = col
-        elif "ton" in col_lower:
-            col_mapping["tonnage"] = col
-        elif "seer" in col_lower:
-            col_mapping["seer"] = col
-        elif "ahri" in col_lower:
-            col_mapping["ahri"] = col
-        elif "indoor" in col_lower or "furnace" in col_lower or "air handler" in col_lower:
-            col_mapping["indoor_model"] = col
-        elif "coil" in col_lower:
-            col_mapping["coil_model"] = col
-
-    # Build matches row by row
-    matched_items = []
-    current_ton = None
+    sections = {}
+    current_section = None
+    headers = None
+    section_rows = []
     
-    for idx, row in df.iterrows():
-        # Fallback check: Look at the row values to see if they define tonnage headers
-        row_str = " ".join([str(val) for val in row.values if pd.notna(val)])
-        row_ton = parse_tonnage_from_text(row_str)
-        if row_ton is not None:
-            current_ton = row_ton
+    for idx, row in df_raw.iterrows():
+        row_list = [str(val).strip() for val in row.values if pd.notna(val)]
+        if not row_list:
             continue
             
-        # Extract fields based on mapping
-        ton_val = row.get(col_mapping.get("tonnage"), None) if "tonnage" in col_mapping else None
-        ton = parse_tonnage_from_text(ton_val) if ton_val else current_ton
-        
-        system_model = row.get(col_mapping.get("system_model"), None) if "system_model" in col_mapping else None
-        if pd.isna(system_model) or str(system_model).strip() == "":
-            continue # Skip spacing/metadata rows
+        first_val = str(row.iloc[0]).strip()
+        if "Air Conditioner" in first_val or "Heat Pump" in first_val:
+            if current_section and section_rows:
+                sections[current_section] = pd.DataFrame(section_rows, columns=headers)
+            current_section = first_val
+            headers = None
+            section_rows = []
+            continue
             
-        system_price = clean_price(row.get(col_mapping.get("system_price"), 0))
-        seer = row.get(col_mapping.get("seer"), "N/A")
-        ahri = row.get(col_mapping.get("ahri"), "N/A")
-        
-        # Indoor Match detail parsing
-        indoor = row.get(col_mapping.get("indoor_model"), "N/A")
-        coil = row.get(col_mapping.get("coil_model"), "N/A")
-
-        matched_items.append({
-            "ton": ton if ton else "Unknown",
-            "system_model": system_model,
-            "system_price": system_price,
-            "seer": seer,
-            "ahri": ahri,
-            "indoor": indoor,
-            "coil": coil,
-        })
-        
-    return matched_items
-
-# --- Main App Execution ---
-
-st.title("Prestige HVAC Quote Helper")
-st.subheader("Trane Edition (2026 Matchups)")
-
-# Using Google Sheets direct export link 
-sheet_url = "https://docs.google.com/spreadsheets/d/1aRef-chlSkfAL6IUc7-sNcX3c7JmIgon/export?format=xlsx"
-
-# Sidebar: Configurations and Adjustments
-st.sidebar.header("Filter & Settings")
-
-all_sheets = get_all_sheets(sheet_url)
-if all_sheets:
-    selected_sheet = st.sidebar.selectbox("Select System Type / Sheet", all_sheets)
-else:
-    selected_sheet = None
-
-markup_percentage = st.sidebar.slider("Standard Price Markup (%)", min_value=0, max_value=200, value=80, step=5)
-flat_adjustment = st.sidebar.number_input("Flat Adjustments ($ +/-)", value=0.0, step=50.0)
-
-if st.sidebar.button("Reset Filters"):
-    st.rerun()
-
-# Processing Selected System Data
-if selected_sheet:
-    raw_df = load_hvac_sheet(sheet_url, selected_sheet)
-    matchups = process_matchups(raw_df)
-    
-    if matchups:
-        # Create DataFrame from matched options
-        df_matchups = pd.DataFrame(matchups)
-        
-        # Filter: Unique Tonnages
-        ton_options = sorted(list(set([m["ton"] for m in matchups if m["ton"] != "Unknown"])))
-        selected_ton = st.selectbox("Select Tonnage Option (Tons)", ["All"] + [f"{t} Ton" for t in ton_options])
-        
-        # Display Grid
-        for item in matchups:
-            # Apply Tonnage filter
-            if selected_ton != "All":
-                target_ton = float(selected_ton.split()[0])
-                if item["ton"] == "Unknown" or float(item["ton"]) != target_ton:
-                    continue
-                    
-            # Pricing Formulas
-            dealer_cost = item["system_price"]
-            marked_up_price = dealer_cost * (1 + (markup_percentage / 100))
-            final_price = marked_up_price + flat_adjustment
+        if "Ton" in row_list or "Tonnage" in row_list:
+            headers = [str(h).strip() for h in row.values if pd.notna(h)]
+            continue
             
-            with st.container():
-                col1, col2, col3 = st.columns([3, 2, 1])
-                with col1:
-                    st.markdown(f"### {item['system_model']} ({item['ton']} Ton)")
-                    st.markdown(f"**Indoor Unit:** {item['indoor']} | **Coil:** {item['coil']}")
-                    st.markdown(f"**SEER2:** {item['seer']} | **AHRI #:** {item['ahri']}")
-                with col2:
-                    st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-                    st.metric("Estimated Quote Price", f"${final_price:,.2f}")
-                    st.markdown(f"<small>Base Equipment Cost: ${dealer_cost:,.2f}</small>", unsafe_allow_html=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
-                with col3:
-                    st.write("")
-                    st.write("")
-                    if st.button("Generate Quote Text", key=f"btn_{item['ahri']}_{item['system_model']}"):
-                        quote_template = f"""
-                        Prestige Heating & Air Proposal:
-                        System: {item['system_model']} ({item['ton']} Ton, {item['seer']} SEER2)
-                        Indoor Components: {item['indoor']} / {item['coil']}
-                        AHRI Certified Reference: {item['ahri']}
-                        Total Investment Option: ${final_price:,.2f} (Includes Standard Installation)
-                        """
-                        st.text_area("Copy proposal text:", value=quote_template.strip(), height=150)
-                st.divider()
+        if current_section and headers and len(row_list) >= len(headers) - 2:
+            cleaned_row = [row.iloc[i] for i in range(len(headers))]
+            section_rows.append(cleaned_row)
+            
+    if current_section and section_rows:
+        sections[current_section] = pd.DataFrame(section_rows, columns=headers)
+        
+    return sections
+
+try:
+    all_sections = load_and_parse_data()
+except Exception as e:
+    st.error(f"Error loading Excel file: {e}")
+    all_sections = {}
+
+# --- SIDEBAR LOGO & FILTERS ---
+st.sidebar.image("https://prestigehvac.com/wp-content/uploads/2021/04/cropped-prestige-hvac-logo-1.png", use_container_width=True)
+st.sidebar.markdown("### **System Configurator**")
+
+# 1. System Type Selection
+system_types = list(all_sections.keys())
+selected_system_type = st.sidebar.selectbox(
+    "Select System Type",
+    options=system_types if system_types else ["No data found"]
+)
+
+# Parse selected dataset
+df_selected = all_sections.get(selected_system_type, pd.DataFrame())
+
+if not df_selected.empty:
+    # Clean up pricing columns to float
+    for col in df_selected.columns:
+        if 'Price' in col or 'Total' in col:
+            df_selected[col] = df_selected[col].astype(str).str.replace('$', '').str.replace(',', '').str.strip()
+            df_selected[col] = pd.to_numeric(df_selected[col], errors='coerce')
+
+    # Convert Ton to float
+    df_selected['Ton'] = pd.to_numeric(df_selected['Ton'], errors='coerce')
+    df_selected = df_selected.dropna(subset=['Ton'])
+
+    # 2. Tonnage Selection
+    ton_options = sorted(df_selected['Ton'].unique())
+    selected_ton = st.sidebar.selectbox("Select Tonnage (Tons)", options=ton_options)
+
+    # Filter data
+    filtered_df = df_selected[df_selected['Ton'] == selected_ton]
+
+    # 3. Markup & Pricing Adjustments
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### **Pricing Configuration**")
+    markup_pct = st.sidebar.slider("Markup Percentage (%)", min_value=0, max_value=100, value=30, step=5) / 100.0
+    add_labor = st.sidebar.number_input("Additional Labor / Fees ($)", min_value=0, value=1200, step=100)
+
+    # --- MAIN CONTENT AREA ---
+    # Header featuring the Prestige Logo matching the Amana layout
+    col_header1, col_header2 = st.columns([1, 4])
+    with col_header1:
+        st.image("https://prestigehvac.com/wp-content/uploads/2021/04/cropped-prestige-hvac-logo-1.png", width=150)
+    with col_header2:
+        st.title("Prestige HVAC Quote Helper")
+        st.subheader(f"System: {selected_system_type}")
+
+    if not filtered_df.empty:
+        row = filtered_df.iloc[0]
+
+        # Calculate final cost breakdowns
+        equipment_total = row.get('Total', 0)
+        marked_up_total = equipment_total * (1 + markup_pct)
+        final_price = marked_up_total + add_labor
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Equipment Cost (Base)", f"${equipment_total:,.2f}")
+        with col2:
+            st.metric(f"With {int(markup_pct*100)}% Markup", f"${marked_up_total:,.2f}")
+        with col3:
+            st.metric("Final Quote Price", f"${final_price:,.2f}")
+
+        # Specs Layout Card
+        st.markdown('<div class="system-card">', unsafe_allow_html=True)
+        st.markdown("### **System Specifications**")
+        
+        col_s1, col_s2, col_s3 = st.columns(3)
+        with col_s1:
+            st.write(f"**Tonnage:** {row.get('Ton')} Tons")
+            st.write(f"**SEER2:** {row.get('SEER2')}")
+        with col_s2:
+            st.write(f"**Max Amp:** {row.get('Max Amp')}")
+            st.write(f"**Line Size:** {row.get('Line Size')}")
+        with col_s3:
+            st.write(f"**Supplies ID:** #{int(row.get('Supplies#', 0)) if pd.notna(row.get('Supplies#')) else 'N/A'}")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # Equipment Breakdown Cards
+        st.markdown("### **Equipment Breakdown**")
+        col_b1, col_b2, col_b3 = st.columns(3)
+
+        with col_b1:
+            st.info(f"**Outdoor Unit (Condenser)**\n\nModel: `{row.get('Outdoor')}`\n\nBase Price: ${row.get('Price', 0):,.2f}")
+        
+        with col_b2:
+            st.success(f"**Indoor Unit (Furnace/Air Handler)**\n\nModel: `{row.get('Indoor')}`\n\nBase Price: ${row.get('Price.1', 0):,.2f}")
+
+        # Find dynamic third column (Coil w/ orifice, Coil w/ TXV, or Heat Kit)
+        third_col_name = [c for c in filtered_df.columns if 'Coil' in c or 'Heat Kit' in c]
+        if third_col_name:
+            col_label = third_col_name[0]
+            with col_b3:
+                st.warning(f"**Auxiliary Component ({col_label})**\n\nModel: `{row.get(col_label)}`\n\nBase Price: ${row.get('Price.2', 0):,.2f}")
+
     else:
-        st.info("Loaded successfully, but no matchups matched standard column patterns. Double-check your column naming conventions.")
+        st.warning("No matches found for the selected Tonnage.")
 else:
-    st.warning("Please configure your Excel file setup on Google Sheets to load matchups.")
+    st.info("Please select a valid system configuration from the sidebar.")
