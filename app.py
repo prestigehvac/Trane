@@ -1,225 +1,169 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import openpyxl
 
-# Set page config with favicon/icons matching the Amana layout
+# 1. Set page config matching Amana layout (no flame emoji)
 st.set_page_config(
-    page_title="Prestige HVAC Quote Helper - Trane Edition",
-    page_icon="🔥",
+    page_title="Prestige HVAC Quote Helper - Trane Edition", 
+    page_icon="https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg",
     layout="wide"
 )
 
-# Custom CSS for styling matching Amana layout
-st.markdown("""
-<style>
-    .reportview-container {
-        background: #f0f2f6;
-    }
-    .card {
-        background-color: #ffffff;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        margin-bottom: 20px;
-    }
-    .price-card {
-        background-color: #e8f4f8;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #1f77b4;
-        margin-bottom: 10px;
-    }
-    .price-value {
-        font-size: 24px;
-        font-weight: bold;
-        color: #1f77b4;
-    }
-    .price-label {
-        font-size: 14px;
-        color: #555555;
-    }
-</style>
-""", unsafe_allow_html=True)
+# 2. Add Company Logo centered ABOVE the title matching Amana repo code sizing
+st.markdown(
+    """
+    <div style="text-align: center;">
+        <img src="https://raw.githubusercontent.com/prestigehvac/Amana/main/prestige_logo.png" width="300">
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
-# Title
-st.title("🔥 Prestige HVAC Quote Helper - Trane Edition")
+# 3. Main Title (Flame icon removed completely)
+st.markdown("<h1 style='text-align: center;'>Prestige HVAC Quote Helper - Trane Edition</h1>", unsafe_allow_html=True)
 
-# Load data
+# 4. Data File Definition
+EXCEL_FILE = "Trane Matchup 2026.xlsx"
+
 @st.cache_data
-def load_data():
-    # Load the Excel file from Google Sheets
-    sheet_url = "https://docs.google.com/spreadsheets/d/1aRef-chlSkfAL6IUc7-sNcX3c7JmIgon/export?format=xlsx"
-    
-    xls = pd.ExcelFile(sheet_url)
-    df_dict = {}
-    for sheet in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet)
-        # Strip whitespace from column names
-        df.columns = df.columns.str.strip()
-        df_dict[sheet] = df
-    return df_dict
+def load_and_preprocess_data(file_path):
+    try:
+        df = pd.read_excel(file_path, sheet_name="Sheet1", header=None)
+        return df
+    except Exception as e:
+        st.error(f"Error loading Excel file: {e}")
+        return None
 
-try:
-    data_dict = load_data()
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    st.stop()
+df_raw = load_and_preprocess_data(EXCEL_FILE)
 
-# Available sheets (System Types)
-system_types = list(data_dict.keys())
+if df_raw is not None:
+    header_row_category = df_raw.iloc[3]
+    header_row_metric = df_raw.iloc[4]
 
-# Sidebar Selection
-st.sidebar.header("⚙️ System Settings")
-selected_system_type = st.sidebar.selectbox("Select System Type", system_types)
+    current_category = None
+    parsed_columns = []
 
-# Get data for selected system type
-df_selected = data_dict[selected_system_type].copy()
+    for col_idx in range(len(df_raw.columns)):
+        cat_val = header_row_category.iloc[col_idx]
+        metric_val = header_row_metric.iloc[col_idx]
 
-# Ensure we have clean column names and handle duplicates immediately
-df_selected.columns = df_selected.columns.str.strip()
+        if pd.notnull(cat_val) and str(cat_val).strip() != "":
+            current_category = str(cat_val).strip()
 
-# De-duplicate column names by appending suffixes if duplicates exist
-df_selected.columns = [
-    f"{col}_{i}" if df_selected.columns.tolist().count(col) > 1 else col 
-    for i, col in enumerate(df_selected.columns)
-]
+        if pd.notnull(metric_val) and str(metric_val).strip() != "":
+            clean_metric = str(metric_val).strip()
+            display_name = f"{current_category} | {clean_metric}" if current_category else clean_metric
+            parsed_columns.append((col_idx, display_name))
 
-# Clean price columns to ensure they are numeric
-price_cols = [
-    'System Cost', 'Sub-Total', 'Cost - 10% Margin', 'Cost - 15% Margin',
-    'Cost - 20% Margin', 'Price - 30% Margin', 'Price - 35% Margin',
-    'Price - 40% Margin', 'Price - 45% Margin', 'Price - 50% Margin'
-]
+    col_indices = [p[0] for p in parsed_columns]
+    col_names = [p[1] for p in parsed_columns]
 
-for col in price_cols:
-    if col in df_selected.columns:
-        # Clean single columns safely
-        df_selected[col] = df_selected[col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False)
-        df_selected[col] = pd.to_numeric(df_selected[col], errors='coerce').fillna(0.0)
+    df_clean = df_raw.iloc[5:].copy()
+    df_clean = df_clean.iloc[:, col_indices]
+    df_clean.columns = col_names
+    df_clean = df_clean.dropna(how='all')
+
+    def safe_parse_ton_display(val):
+        if pd.isnull(val):
+            return None
+        s = str(val).strip()
+        if not s:
+            return None
+        if "Ton" in s:
+            return s
+        try:
+            f_val = float(s)
+            if f_val.is_integer():
+                return f"{int(f_val)} Ton"
+            else:
+                return f"{f_val} Ton"
+        except ValueError:
+            return s
+
+    def clean_price(val):
+        if pd.isnull(val):
+            return 0.0
+        s = str(val).replace('$', '').replace(',', '').strip()
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+
+    system_cols = [c for c in df_clean.columns if "System" in c or "Condenser" in c or "Furnace" in c or "Coil" in c or "Air Handler" in c]
+    if len(system_cols) > 0:
+        first_sys_col = system_cols[0]
+        df_clean = df_clean.dropna(subset=[first_sys_col])
+
+    st.sidebar.header("Filter Systems")
+
+    all_tons = []
+    ton_col = None
+    for c in df_clean.columns:
+        if "Ton" in c:
+            ton_col = c
+            raw_vals = df_clean[c].dropna().unique()
+            for r in raw_vals:
+                parsed = safe_parse_ton_display(r)
+                if parsed and parsed not in all_tons:
+                    all_tons.append(parsed)
+            break
+
+    if all_tons:
+        selected_ton = st.sidebar.selectbox("Select System Size (Tonnage)", sorted(all_tons))
     else:
-        # Handle duplicated columns (e.g., 'System Cost_0', 'System Cost_1') safely
-        matching_cols = [c for c in df_selected.columns if c.startswith(f"{col}_")]
-        for m_col in matching_cols:
-            df_selected[m_col] = df_selected[m_col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False)
-            df_selected[m_col] = pd.to_numeric(df_selected[m_col], errors='coerce').fillna(0.0)
+        selected_ton = None
 
-# Main Form
-st.header(f"🛠️ Configure {selected_system_type}")
+    filtered_df = df_clean.copy()
+    if selected_ton and ton_col:
+        filtered_df['temp_ton_clean'] = filtered_df[ton_col].apply(safe_parse_ton_display)
+        filtered_df = filtered_df[filtered_df['temp_ton_clean'] == selected_ton]
+        filtered_df = filtered_df.drop(columns=['temp_ton_clean'])
 
-col1, col2 = st.columns(2)
-
-with col1:
-    # 1. Size
-    if 'Size (Tons)' in df_selected.columns:
-        sizes = sorted(df_selected['Size (Tons)'].dropna().unique())
-        selected_size = st.selectbox("Select System Size (Tons)", sizes)
-        df_filtered = df_selected[df_selected['Size (Tons)'] == selected_size]
-    elif 'Size' in df_selected.columns:
-        sizes = sorted(df_selected['Size'].dropna().unique())
-        selected_size = st.selectbox("Select System Size", sizes)
-        df_filtered = df_selected[df_selected['Size'] == selected_size]
+    if not filtered_df.empty:
+        st.subheader(f"Available {selected_ton if selected_ton else ''} Trane Options")
+        
+        for idx, row in filtered_df.iterrows():
+            with st.container():
+                st.markdown("---")
+                
+                sys_title_parts = []
+                for col_name in row.index:
+                    if any(x in col_name for x in ["System", "Condenser", "Furnace", "Coil", "Air Handler"]):
+                        val = row[col_name]
+                        if pd.notnull(val) and str(val).strip():
+                            sys_title_parts.append(str(val).strip())
+                
+                sys_title = " - ".join(sys_title_parts) if sys_title_parts else f"System Option {idx}"
+                st.write(f"### {sys_title}")
+                
+                cols = st.columns(3)
+                col_idx = 0
+                
+                price_col_name = None
+                total_price = 0.0
+                
+                for col_name in row.index:
+                    if "Price" in col_name or "Total" in col_name:
+                        price_col_name = col_name
+                        total_price = clean_price(row[col_name])
+                        continue
+                    
+                    val = row[col_name]
+                    if pd.notnull(val) and str(val).strip() != "":
+                        with cols[col_idx % 3]:
+                            st.write(f"**{col_name.split('|')[-1].strip()}:** {val}")
+                        col_idx += 1
+                
+                st.markdown(f"<h3 style='color: #FF4B4B;'>Total Price: ${total_price:,.2f}</h3>", unsafe_allow_html=True)
+                
+                # Dynamic Quote Calculations mimicking layout
+                markup = st.slider("Markup (%)", min_value=0, max_value=200, value=100, step=5, key=f"markup_{idx}")
+                labor_cost = st.number_input("Labor Cost ($)", min_value=0, value=1200, step=100, key=f"labor_{idx}")
+                permit_cost = st.number_input("Permit & Misc ($)", min_value=0, value=400, step=50, key=f"permit_{idx}")
+                
+                equipment_marked_up = total_price * (1 + (markup / 100.0))
+                quote_total = equipment_marked_up + labor_cost + permit_cost
+                
+                st.markdown(f"#### Calculated Quote Price: **${quote_total:,.2f}**")
     else:
-        st.warning("No 'Size' column found in this sheet.")
-        df_filtered = df_selected.copy()
-
-    # 2. Outdoor Model (if applicable)
-    outdoor_col = [c for c in df_filtered.columns if 'Outdoor' in c or 'OD' in c or 'Condenser' in c]
-    if outdoor_col:
-        outdoor_col = outdoor_col[0]
-        outdoor_models = sorted(df_filtered[outdoor_col].dropna().astype(str).unique())
-        selected_outdoor = st.selectbox("Select Outdoor Unit Model", outdoor_models)
-        df_filtered = df_filtered[df_filtered[outdoor_col] == selected_outdoor]
-    else:
-        selected_outdoor = None
-
-    # 3. Indoor Model (if applicable)
-    indoor_col = [c for c in df_filtered.columns if 'Indoor' in c or 'ID' in c or 'Coil' in c or 'Furnace' in c or 'Air Handler' in c]
-    if indoor_col:
-        indoor_col = indoor_col[0]
-        indoor_models = sorted(df_filtered[indoor_col].dropna().astype(str).unique())
-        selected_indoor = st.selectbox("Select Indoor Unit Model", indoor_models)
-        df_filtered = df_filtered[df_filtered[indoor_col] == selected_indoor]
-    else:
-        selected_indoor = None
-
-with col2:
-    # 4. Heat Kit / Electric Heat (if applicable)
-    heat_col = [c for c in df_filtered.columns if 'Heat Kit' in c or 'Electric Heat' in c or 'KW' in c]
-    if heat_col:
-        heat_col = heat_col[0]
-        heat_kits = sorted(df_filtered[heat_col].dropna().astype(str).unique())
-        selected_heat = st.selectbox("Select Heat Kit / Electric Heat", heat_kits)
-        df_filtered = df_filtered[df_filtered[heat_col] == selected_heat]
-    else:
-        selected_heat = None
-
-# Matchups and Pricing Output
-st.markdown("---")
-st.subheader("📊 Matchup Results & Pricing")
-
-if df_filtered.empty:
-    st.info("No matchups found matching the selected criteria. Try adjusting your selections.")
-else:
-    if len(df_filtered) > 1:
-        st.warning(f"Found {len(df_filtered)} matching matchups. Showing the first match. Use more filters above if needed.")
-    
-    matchup_row = df_filtered.iloc[0]
-    
-    # Display equipment details
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### 📋 Equipment Matchup Details")
-    
-    detail_cols = [c for c in df_filtered.columns if c not in price_cols and not any(c.startswith(f"{p}_") for p in price_cols)]
-    
-    cols = st.columns(3)
-    for idx, col in enumerate(detail_cols):
-        with cols[idx % 3]:
-            label = col.split('_')[0] if '_' in col else col
-            st.write(f"**{label}:** {matchup_row[col]}")
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Display pricing cards
-    st.markdown("### 💰 Estimated Margins & Pricing")
-    
-    def get_price_value(col_name):
-        if col_name in matchup_row:
-            return matchup_row[col_name]
-        matching = [c for c in matchup_row.index if c.startswith(f"{col_name}_")]
-        if matching:
-            return matchup_row[matching[0]]
-        return 0.0
-
-    p_cols = st.columns(4)
-    
-    margins_to_show = [
-        ('Price - 30% Margin', "30% Margin Price"),
-        ('Price - 35% Margin', "35% Margin Price"),
-        ('Price - 40% Margin', "40% Margin Price"),
-        ('Price - 45% Margin', "45% Margin Price"),
-    ]
-    
-    for idx, (col_name, label) in enumerate(margins_to_show):
-        price_val = get_price_value(col_name)
-        with p_cols[idx]:
-            st.markdown(f"""
-            <div class="price-card">
-                <div class="price-label">{label}</div>
-                <div class="price-value">${price_val:,.2f}</div>
-            </div>
-            """, unsafe_allowed_html=True)
-
-    # Secondary Pricing Details Row
-    st.markdown("#### 🔍 Internal Cost Reference")
-    c_cols = st.columns(4)
-    
-    costs_to_show = [
-        ('System Cost', "Equipment Cost"),
-        ('Sub-Total', "Job Sub-Total"),
-        ('Cost - 10% Margin', "10% Margin Cost"),
-        ('Cost - 15% Margin', "15% Margin Cost")
-    ]
-    
-    for idx, (col_name, label) in enumerate(costs_to_show):
-        cost_val = get_price_value(col_name)
-        with c_cols[idx]:
-            st.write(f"**{label}:** ${cost_val:,.2f}")
+        st.info("No matching Trane systems found for the selected tonnage.")
