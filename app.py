@@ -21,35 +21,26 @@ EXCEL_FILE = "Trane Matchup 2026.xlsx"
 def load_and_preprocess_data(file_path):
     """
     Loads and cleans the Trane Matchup multi-column sheet.
-    Dynamically identifies system types (column prefixes) and handles
-    clean price/float conversions.
     """
     if not os.path.exists(file_path):
         st.error(f"Could not find the Excel file: '{file_path}' in the current directory.")
         return None
 
-    # Load sheet. Trane matchup sheets often use hierarchical or wide layouts.
-    df = pd.read_excel(file_path, sheet_name="Sheet1", header=None)
-    
-    # Let's inspect the headers to group them.
-    # We find system names in the top rows or as prefixes in the columns.
-    # Based on the schema, column names are styled as: 'System Name/Metric'
-    # We reconstruct a clean dataframe from this layout.
-    df_headers = pd.read_excel(file_path, sheet_name="Sheet1", header=4) # Headers start around row 5 (index 4)
-    
+    # Load starting at index row 4 (row 5) where the structured headers reside
+    df_headers = pd.read_excel(file_path, sheet_name="Sheet1", header=4)
     return df_headers
 
 df_raw = load_and_preprocess_data(EXCEL_FILE)
 
 if df_raw is not None:
-    # 1. Parse and extract system types from columns
-    # We split columns on '/' to find the categories/systems and their corresponding sub-metrics
+    # 1. Parse and extract system types from columns safely using right-split
     parsed_columns = []
     systems = set()
     
     for col in df_raw.columns:
         if "/" in str(col):
-            parts = str(col).split("/")
+            # Split from the right only once to handle slashes like "w/ fixed orifice"
+            parts = str(col).rsplit("/", 1)
             system_name = parts[0].strip()
             metric_name = parts[1].strip()
             parsed_columns.append((system_name, metric_name, col))
@@ -63,10 +54,8 @@ if df_raw is not None:
     # --- Sidebar Admin & Inputs ---
     st.sidebar.header("⚙️ Admin Controls")
     
-    # Upload fallback if they ever need to update it
     uploaded_file = st.sidebar.file_uploader("Upload New Trane Pricing Excel", type=["xlsx"])
     if uploaded_file is not None:
-        # Save temporary or overwrite
         with open(EXCEL_FILE, "wb") as f:
             f.write(uploaded_file.getbuffer())
         st.sidebar.success("Pricing file updated successfully! Refreshing...")
@@ -104,7 +93,7 @@ if df_raw is not None:
     system_cols = [item for item in parsed_columns if item[0] == selected_system]
     
     if system_cols:
-        # Build a temporary slice of the dataframe specifically representing this system's columns
+        # Build a temporary slice representing this system's columns
         sys_df = pd.DataFrame()
         for _, metric, original_col in system_cols:
             sys_df[metric] = df_raw[original_col]
@@ -126,7 +115,6 @@ if df_raw is not None:
         matched_row = sys_df[sys_df["Ton_Display"] == selected_ton]
 
         if not matched_row.empty:
-            # Safely grab the data from the first matched row
             row = matched_row.iloc[0]
             
             # Extract models and base cost
@@ -147,15 +135,9 @@ if df_raw is not None:
                 except ValueError:
                     return 0.0
 
-            outdoor_price = clean_price(row.get("Price", 0.0))
-            # Some spreadsheets have multiple 'Price' headers under a merged block.
-            # Let's retrieve by exact indexes or specific fallback keys if prices differ:
-            raw_row_dict = matched_row.to_dict(orient='records')[0]
-            
             # Reconstruct component and total prices directly from the original DataFrame row
             orig_row = df_raw.loc[matched_row.index[0]]
             
-            # Find the pricing values
             prices = []
             for item in system_cols:
                 if item[1] == "Price":
@@ -170,8 +152,7 @@ if df_raw is not None:
             if distributor_total == 0.0:
                 distributor_total = outdoor_cost + indoor_cost + coil_cost
 
-            # Calculate Retail Price matching your multiplier math:
-            # Formula: (Distributor Cost * Markup Multiplier) + Labor & Material Costs
+            # Calculate Retail Price
             calculated_retail_price = (distributor_total * markup_multiplier) + labor_material_cost
 
             st.markdown("---")
