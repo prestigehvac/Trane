@@ -1,153 +1,123 @@
-import streamlit as st
 import pandas as pd
-import requests
-import io
+import sqlite3
+import streamlit as st
 
-# Set page configurations
 st.set_page_config(
     page_title="Prestige Quick Quote Tool - Trane Edition", 
-    layout="centered"
+    page_icon="https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg",
+    layout="wide"
 )
 
-# Display Company Logo above the title
-st.image("https://prestigeairtx.com/wp-content/uploads/2022/11/Prestige-Logo.png", width=250)
+# --- 1. LOGO CENTERING (SAME AS AMANA) ---
+col1, col2, col3 = st.columns([4.25, 1.5, 4.25])
 
+with col2:
+    # Display and center the logo above the title
+    st.image(
+        "https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg",
+        use_container_width=True
+    )
+
+# Placing st.title AFTER the logo columns forces it to sit underneath the logo
 st.title("Prestige Quick Quote Tool - Trane Edition")
 
-# Direct Export Link for your Trane Matchup Google Sheet
-sheet_url = "https://docs.google.com/spreadsheets/d/1aRef-chlSkfAL6IUc7-sNcX3c7JmIgon/export?format=xlsx"
-
+# --- 2. CACHED DATA LOADING & CLEANING ---
 @st.cache_data
-def load_data(url):
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        # Read without headers to parse multi-table structure manually
-        df = pd.read_excel(io.BytesIO(response.content), header=None)
-        return df
-    except Exception as e:
-        st.error(f"Error downloading Google Sheet: {e}")
-        return None
-
-df_raw = load_data(sheet_url)
-
-if df_raw is not None:
-    # Identify system section header locations
-    sections = {}
-    current_section = None
-    section_start_idx = None
+def load_trane_excel_data():
+    df = pd.read_excel("Trane Matchup 2026.xlsx", sheet_name="Sheet1", header=4)
     
-    # Exactly matching target sections from the Sheet
-    target_systems = [
-        "Air Conditioner with 80% AFUE Gas Furnace and Cased Coil R-454b 14.3 SEER2 w/ fixed orifice",
-        "Air Conditioner with Air Handler and Heat Kit R-454b 14.3 SEER2",
-        "Heat Pump with Air Handler and Heat Kit R-454b 14.3 SEER2"
-    ]
-    
-    for idx, row in df_raw.iterrows():
-        row_str = row.astype(str).tolist()
-        matched_system = None
-        for cell in row_str:
-            cell_clean = cell.strip()
-            if cell_clean in target_systems:
-                matched_system = cell_clean
-                break
-        
-        if matched_system:
-            if current_section:
-                sections[current_section] = (section_start_idx, idx)
-            current_section = matched_system
-            section_start_idx = idx
-            
-    if current_section:
-        sections[current_section] = (section_start_idx, len(df_raw))
-        
-    # System selection UI
-    system_type = st.selectbox("Select System Type", list(sections.keys()))
-    
-    if system_type:
-        start_idx, end_idx = sections[system_type]
-        section_df = df_raw.iloc[start_idx:end_idx].reset_index(drop=True)
-        
-        # Locate header row containing column labels (e.g., "Ton")
-        header_row_idx = None
-        for r_idx, row in section_df.iterrows():
-            if "Ton" in row.astype(str).values:
-                header_row_idx = r_idx
-                break
-                
-        if header_row_idx is not None:
-            # Set columns based on the matched headers row
-            headers = section_df.iloc[header_row_idx].tolist()
-            headers = [str(h).strip() if pd.notna(h) else f"Col_{i}" for i, h in enumerate(headers)]
-            
-            # Isolate rows containing values
-            data_df = section_df.iloc[header_row_idx + 1:].copy()
-            data_df.columns = headers
-            
-            # Remove empty and helper text rows to strictly parse tonnage numerical values
-            data_df = data_df[data_df["Ton"].notna()]
-            data_df["Ton"] = pd.to_numeric(data_df["Ton"], errors='coerce')
-            data_df = data_df[data_df["Ton"].notna()]
-            
-            # Clean currency formatting
-            def clean_price(val):
-                if pd.isna(val):
-                    return 0.0
-                val_str = str(val).replace('$', '').replace(',', '').strip()
-                try:
-                    return float(val_str)
-                except ValueError:
-                    return 0.0
-            
-            # Select Tonnage UI
-            tonnages = sorted(data_df["Ton"].unique())
-            selected_ton = st.selectbox("Select Tonnage (Tons)", tonnages)
-            
-            row_match = data_df[data_df["Ton"] == selected_ton]
-            
-            if not row_match.empty:
-                row_match = row_match.iloc[0]
-                
-                st.subheader(f"System Configuration: {selected_ton} Tons")
-                
-                # Extract dynamic variable column names (such as "Coil w/ orifice", "Coil w/ TXV", or "Heat Kit")
-                cols = list(row_match.index)
-                third_col_name = cols[8] if len(cols) > 8 else "Auxiliary Component"
-                
-                # Fetch Models
-                outdoor_model = row_match.get("Outdoor", "N/A")
-                indoor_model = row_match.get("Indoor", "N/A")
-                third_model = row_match.iloc[8] if len(row_match) > 8 else "N/A"
-                
-                # Fetch and clean Prices
-                outdoor_price = clean_price(row_match.iloc[5] if len(row_match) > 5 else 0)
-                indoor_price = clean_price(row_match.iloc[7] if len(row_match) > 7 else 0)
-                third_price = clean_price(row_match.iloc[9] if len(row_match) > 9 else 0)
-                total_price = clean_price(row_match.get("Total", 0))
-                
-                # Key Metrics Display
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("SEER2 Rating", row_match.get("SEER2", "N/A"))
-                    st.metric("Max Amp", row_match.get("Max Amp", "N/A"))
-                with col2:
-                    st.metric("Line Size", row_match.get("Line Size", "N/A"))
-                    st.metric("Supplies Group", row_match.get("Supplies#", "N/A"))
-                
-                st.markdown("### Equipment Breakdown")
-                
-                breakdown_df = pd.DataFrame({
-                    "Component": ["Outdoor Unit", "Indoor Unit", third_col_name],
-                    "Model": [outdoor_model, indoor_model, third_model],
-                    "Price": [f"${outdoor_price:,.2f}", f"${indoor_price:,.2f}", f"${third_price:,.2f}"]
-                })
-                st.table(breakdown_df)
-                
-                st.success(f"### **Total Cost: ${total_price:,.2f}**")
-            else:
-                st.warning("No configuration found for this Tonnage.")
+    # Strip prefixes like "Air Conditioner with 80% AFUE Gas Furnace.../" from headers
+    cleaned_cols = []
+    for col in df.columns:
+        if "/" in col:
+            cleaned_cols.append(col.split("/")[-1].strip())
         else:
-            st.error("Could not parse column headers ('Ton') in this sheet section.")
-else:
-    st.error("Could not retrieve or read the data structure from your Excel Spreadsheet.")
+            cleaned_cols.append(col.strip())
+    df.columns = cleaned_cols
+    
+    # Ensure there are no duplicate column names by renaming the multiple 'Price' fields
+    price_counter = 0
+    new_cols = []
+    for col in df.columns:
+        if col == "Price":
+            if price_counter == 0:
+                new_cols.append("Outdoor Price")
+            elif price_counter == 1:
+                new_cols.append("Indoor Price")
+            else:
+                new_cols.append("Coil Price")
+            price_counter += 1
+        else:
+            new_cols.append(col)
+    df.columns = new_cols
+    
+    # Clean up empty rows
+    df = df.dropna(subset=["Ton"])
+    return df
+
+def get_database_connection():
+    df = load_trane_excel_data()
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    df.to_sql("trane_systems", conn, if_exists="replace", index=False)
+    return conn
+
+# Establish database connection
+try:
+    conn = get_database_connection()
+    
+    # --- 3. TECHNICIAN DROP-DOWNS ---
+    # Tonnage selection
+    tonnages = pd.read_sql("SELECT DISTINCT [Ton] FROM trane_systems", conn)["Ton"].tolist()
+    selected_ton = st.selectbox("Select Tonnage", sorted(tonnages))
+    
+    # Filter outdoor models based on Tonnage
+    outdoors_df = pd.read_sql(
+        f"SELECT DISTINCT [Outdoor], [Outdoor Price] FROM trane_systems WHERE [Ton] = {selected_ton}", 
+        conn
+    )
+    
+    if not outdoors_df.empty:
+        outdoors_df['display_name'] = outdoors_df['Outdoor'] + " — " + outdoors_df['Outdoor Price'].astype(str)
+        selected_display = st.selectbox("Select Outdoor Unit Model", outdoors_df['display_name'])
+        selected_outdoor = selected_display.split(" — ")[0]
+    else:
+        selected_outdoor = None
+        
+    # --- 4. MARKUP CALCULATOR SIDEBAR ---
+    st.sidebar.header("Pricing Calculator")
+    markup_multiplier = st.sidebar.slider("Markup Multiplier", 1.0, 3.0, 1.8, step=0.05)
+    flat_labor = st.sidebar.number_input("Labor & Material Cost ($)", value=1700)
+
+    # --- 5. EXECUTE SEARCH & DISPLAY RESULTS ---
+    if selected_outdoor:
+        query = f"""
+            SELECT 
+                [SEER2], [Max Amp], [Line Size], 
+                [Outdoor], [Outdoor Price], 
+                [Indoor], [Indoor Price], 
+                [Coil w/ orifice], [Coil Price], 
+                [Total] 
+            FROM trane_systems 
+            WHERE [Ton] = {selected_ton} AND [Outdoor] = '{selected_outdoor}'
+        """
+        results = pd.read_sql(query, conn)
+        
+        if not results.empty:
+            # Strip currency symbols to calculate
+            raw_totals = results["Total"].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).astype(float)
+            results["Retail Equipment Price"] = raw_totals * markup_multiplier
+            results["Total Customer Investment"] = results["Retail Equipment Price"] + flat_labor
+            
+            # Format outputs elegantly
+            results["Retail Equipment Price"] = results["Retail Equipment Price"].map('${:,.2f}'.format)
+            results["Total Customer Investment"] = results["Total Customer Investment"].map('${:,.2f}'.format)
+            
+            st.subheader("Available Matchup & Customer Pricing")
+            st.dataframe(results, use_container_width=True)
+        else:
+            st.info("No matching systems found for this combination.")
+            
+    conn.close()
+
+except Exception as e:
+    st.error(f"Error initializing database or processing file: {e}")
