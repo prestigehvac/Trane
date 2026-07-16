@@ -1,177 +1,128 @@
 import streamlit as st
 import pandas as pd
+import os
 
-# ==========================================
-# 1. PAGE SETUP (Relying on config.toml for Theme)
-# ==========================================
-st.set_page_config(
-    page_title="Prestige HVAC Quote Helper - Trane Edition",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Helper to read colors directly from the .streamlit/config.toml palette
+def get_theme_color(key, default):
+    config_path = os.path.join(".streamlit", "config.toml")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as f:
+                for line in f:
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        if k.strip() == key:
+                            # Clean up quotes and whitespace from the color hex
+                            return v.strip().strip('"').strip("'")
+        except Exception:
+            pass
+    return default
 
-# ==========================================
-# 2. ROBUST COLUMN MATCHING
-# ==========================================
-def find_column(df, target_name):
-    """
-    Finds a column name in df matching target_name, 
-    ignoring case and whitespace.
-    """
-    target_clean = str(target_name).strip().lower()
-    for col in df.columns:
-        if str(col).strip().lower() == target_clean:
-            return col
-    # Fallback substring match
-    for col in df.columns:
-        if target_clean in str(col).strip().lower():
-            return col
-    return None
+# Dynamically fetch colors from your config.toml
+primary_color = get_theme_color("primaryColor", "#FF4B4B")
+text_color = get_theme_color("textColor", "#FFFFFF")
+background_color = get_theme_color("backgroundColor", "#1E1E2F")
 
-def clean_and_format_price(val):
-    """Cleans numeric formats or currency strings safely."""
-    if pd.isna(val):
-        return 0.0
-    val_str = str(val).replace('$', '').replace(',', '').strip()
-    try:
-        return float(val_str)
-    except ValueError:
-        return 0.0
+# Custom style blocks that adapt dynamically to your config.toml palette
+st.markdown(f"""
+    <style>
+    .stApp {{
+        background-color: {background_color};
+        color: {text_color};
+    }}
+    h1, h2, h3, .stMarkdown p strong {{
+        color: {primary_color} !important;
+    }}
+    div[data-testid="stBlock"] {{
+        border: 1px solid {primary_color}33;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+    }}
+    </style>
+""", unsafe_allow_html=True)
 
-# ==========================================
-# 3. DATA LOADING & MULTI-TABLE SPLITTING
-# ==========================================
-SHEET_ID = "1aRef-chlSkfAL6IUc7-sNcX3c7JmIgon"
-GID = "2046850502"
-csv_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID}"
-
-@st.cache_data(ttl=600)
-def load_and_split_data(url):
-    df_raw = pd.read_csv(url, header=None)
-    
-    sections = {}
-    current_section_name = None
-    section_rows = []
-    
-    for idx, row in df_raw.iterrows():
-        row_values = [str(x).strip() for x in row.values if pd.notna(x)]
-        
-        # Identify section headers
-        if len(row_values) == 1 and "seer2" in row_values[0].lower():
-            if current_section_name and section_rows:
-                sections[current_section_name] = pd.DataFrame(section_rows)
-            current_section_name = row_values[0]
-            section_rows = []
-        elif current_section_name is not None:
-            section_rows.append(row.values)
-            
-    # Save final section
-    if current_section_name and section_rows:
-        sections[current_section_name] = pd.DataFrame(section_rows)
-        
-    # Format tables properly
-    final_sections = {}
-    for name, df_sec in sections.items():
-        if not df_sec.empty:
-            df_sec.columns = df_sec.iloc[0]
-            df_sec = df_sec[1:].reset_index(drop=True)
-            df_sec = df_sec.dropna(how='all')
-            final_sections[name] = df_sec
-            
-    return final_sections
-
-try:
-    all_tables = load_and_split_data(csv_url)
-except Exception as e:
-    st.error(f"Failed to load Google Sheet data: {e}")
-    st.stop()
-
-# ==========================================
-# 4. SIDEBAR NAVIGATION
-# ==========================================
-# Image Logo header exactly matching Amana style
-st.sidebar.image("https://prestigetranequoter.streamlit.app/~/+/media/79b47e8ef6e61e06fa4df9fe6a0b943715dfc640e0231cf4c478e9b6.png", use_container_width=True)
-st.sidebar.markdown("## Prestige Quote Helper")
-
-if not all_tables:
-    st.warning("No matchup tables found in the Google Sheet.")
-    st.stop()
-
-# Dropdowns
-system_types = list(all_tables.keys())
-selected_system = st.sidebar.selectbox("Select System Type", system_types)
-
-df_clean = all_tables[selected_system]
-
-# Safely extract dynamic columns using the helper
-ton_col = find_column(df_clean, "Ton")
-outdoor_col = find_column(df_clean, "Outdoor")
-indoor_col = find_column(df_clean, "Indoor")
-total_col = find_column(df_clean, "Total")
-
-if not ton_col:
-    st.error("Could not locate the 'Ton' column in the layout.")
-    st.stop()
-
-# Clean and filter the available ton options
-raw_tons = df_clean[ton_col].dropna().astype(str).str.strip()
-raw_tons = raw_tons[raw_tons.str.match(r'^\d+(\.\d+)?$')].unique()
-raw_tons = sorted(raw_tons, key=float)
-
-selected_ton = st.sidebar.selectbox("Select System Tonnage", raw_tons)
-
-# Retrieve matching row
-df_filtered = df_clean[df_clean[ton_col].astype(str).str.strip() == str(selected_ton)]
-
-if df_filtered.empty:
-    st.warning("No matches found for the selected tonnage.")
-    st.stop()
-
-row_match = df_filtered.iloc[0]
-
-# Quote Settings
-markup = st.sidebar.slider("Quote Markup Percentage (%)", min_value=0, max_value=100, value=35, step=5)
-
-# ==========================================
-# 5. MAIN DISPLAY LAYOUT
-# ==========================================
+# Logo
+st.image("https://prestigeheatingandair.com/wp-content/uploads/2021/08/logo.png", width=150)
 st.title("Prestige Quick Quote Tool - Trane Edition")
-st.write("---")
 
-st.markdown(f"### Configured System: **{selected_system}**")
+# File path
+file_path = "Trane Matchup 2026.xlsx"
 
-# Calculate price securely
-total_raw_price = 0.0
-if total_col:
-    total_raw_price = clean_and_format_price(row_match[total_col])
+if not os.path.exists(file_path):
+    st.error(f"Error: '{file_path}' not found. Please ensure the file is in the repository.")
 else:
-    # Fallback to summing any columns containing 'price' in the title
-    for idx, col in enumerate(df_clean.columns):
-        if "price" in str(col).lower():
-            total_raw_price += clean_and_format_price(row_match.iloc[idx])
+    # Load Excel File
+    xls = pd.ExcelFile(file_path)
+    sheet_names = xls.sheet_names
 
-marked_up_total = total_raw_price * (1 + (markup / 100))
+    # Select Sheet
+    selected_sheet = st.selectbox("Select Equipment Type", sheet_names)
 
-# Display Cards Side-by-Side
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("Equipment Specifications")
-    
-    if outdoor_col:
-        st.info(f"**Outdoor Unit (Condenser):** {row_match[outdoor_col]}")
-    if indoor_col:
-        st.info(f"**Indoor Unit (Air Handler / Furnace):** {row_match[indoor_col]}")
+    if selected_sheet:
+        # Read starting from row 5 (0-indexed 4) to skip title blocks
+        df = pd.read_excel(xls, sheet_name=selected_sheet, header=4)
         
-    # Print remaining matched sheet metadata fields
-    for col in df_clean.columns:
-        if col not in [ton_col, outdoor_col, indoor_col, total_col] and "price" not in str(col).lower():
-            if pd.notna(row_match[col]) and str(row_match[col]).strip() != "":
-                st.write(f"**{col}:** {row_match[col]}")
+        # Clean column names
+        df.columns = df.columns.str.strip()
+        df_clean = df.dropna(how='all')
 
-with col2:
-    st.subheader("Pricing Breakdown")
-    st.metric(label="Base Wholesale Price", value=f"${total_raw_price:,.2f}")
-    st.metric(label="Markup Applied", value=f"{markup}%")
-    st.write("---")
-    st.metric(label="Customer Quote Price", value=f"${marked_up_total:,.2f}")
+        # Find columns by suffix to handle merged/complex headers
+        def find_col(suffix):
+            for col in df_clean.columns:
+                if col.endswith(suffix) or col == suffix:
+                    return col
+            return None
+
+        ton_col = find_col("Ton")
+        seer_col = find_col("SEER2")
+        outdoor_col = find_col("Outdoor")
+        indoor_col = find_col("Indoor")
+        coil_col = find_col("Coil w/ orifice") or find_col("Coil w/ TXV") or find_col("Coil")
+        total_col = find_col("Total")
+
+        # Fallbacks
+        if not ton_col:
+            ton_col = [c for c in df_clean.columns if "ton" in c.lower()][0] if [c for c in df_clean.columns if "ton" in c.lower()] else None
+        if not total_col:
+            total_col = [c for c in df_clean.columns if "total" in c.lower()][-1] if [c for c in df_clean.columns if "total" in c.lower()] else None
+
+        if ton_col and total_col:
+            # Extract unique tonnage options
+            raw_vals = df_clean[ton_col].dropna().unique()
+            ton_values = sorted([float(val) for val in raw_vals if isinstance(val, (int, float)) or str(val).replace('.', '', 1).isdigit()])
+
+            selected_ton = st.selectbox("Select Tonnage", ton_values)
+
+            if selected_ton:
+                match_df = df_clean[df_clean[ton_col] == selected_ton]
+
+                if not match_df.empty:
+                    st.success(f"Matched Options for {selected_ton} Tons:")
+
+                    for idx, row in match_df.iterrows():
+                        with st.container():
+                            st.markdown(f"### Option {idx + 1}")
+                            
+                            outdoor = row.get(outdoor_col, "N/A")
+                            indoor = row.get(indoor_col, "N/A")
+                            coil = row.get(coil_col, "N/A")
+                            total_price = row.get(total_col, "N/A")
+                            seer = row.get(seer_col, "N/A")
+
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Outdoor Unit:** {outdoor}")
+                                st.write(f"**Indoor Unit:** {indoor}")
+                                st.write(f"**Coil:** {coil}")
+                            with col2:
+                                st.write(f"**SEER2:** {seer}")
+                                if isinstance(total_price, (int, float)):
+                                    st.subheader(f"Total: ${total_price:,.2f}")
+                                else:
+                                    st.subheader(f"Total: {total_price}")
+                            st.markdown("---")
+                else:
+                    st.warning("No matched options found for this tonnage.")
+        else:
+            st.error("Could not map the Excel columns. Please check your sheet headers.")
