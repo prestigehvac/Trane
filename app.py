@@ -3,7 +3,7 @@ import pandas as pd
 
 st.set_page_config(page_title="Prestige Quick Quote Tool - Trane Edition", layout="centered")
 
-st.image("https://callprestigehvac.com/wp-content/uploads/2024/04/prestige-logo.png", width=200) # Optional: uses your web logo if available
+st.image("https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg", width=200) # Optional: uses your web logo if available
 st.title("Prestige Quick Quote Tool - Trane Edition")
 
 # 1. Load and parse the Excel file
