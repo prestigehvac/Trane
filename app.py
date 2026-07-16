@@ -1,11 +1,15 @@
-import streamlit as np
 import streamlit as st
 import pandas as pd
+import numpy as np
 
-# Set page config
-st.set_page_config(page_title="Prestige HVAC Quote Helper - Trane Edition", layout="wide")
+# Set page config with favicon/icons matching the Amana layout
+st.set_page_config(
+    page_title="Prestige HVAC Quote Helper - Trane Edition",
+    page_icon="🔥",
+    layout="wide"
+)
 
-# Custom CSS for styling
+# Custom CSS for styling matching Amana layout
 st.markdown("""
 <style>
     .reportview-container {
@@ -35,16 +39,15 @@ st.markdown("""
         color: #555555;
     }
 </style>
-""", unsafe_allowed_html=True)
+""", unsafe_allow_html=True)
 
 # Title
-st.title("Prestige HVAC Quote Helper - Trane Edition")
+st.title("🔥 Prestige HVAC Quote Helper - Trane Edition")
 
 # Load data
 @st.cache_data
 def load_data():
-    # Load the Excel file
-    # Replace with your actual file path or URL
+    # Load the Excel file from Google Sheets
     sheet_url = "https://docs.google.com/spreadsheets/d/1aRef-chlSkfAL6IUc7-sNcX3c7JmIgon/export?format=xlsx"
     
     xls = pd.ExcelFile(sheet_url)
@@ -66,7 +69,7 @@ except Exception as e:
 system_types = list(data_dict.keys())
 
 # Sidebar Selection
-st.sidebar.header("System Settings")
+st.sidebar.header("⚙️ System Settings")
 selected_system_type = st.sidebar.selectbox("Select System Type", system_types)
 
 # Get data for selected system type
@@ -101,7 +104,7 @@ for col in price_cols:
             df_selected[m_col] = pd.to_numeric(df_selected[m_col], errors='coerce').fillna(0.0)
 
 # Main Form
-st.header(f"Configure {selected_system_type}")
+st.header(f"🛠️ Configure {selected_system_type}")
 
 col1, col2 = st.columns(2)
 
@@ -145,7 +148,6 @@ with col2:
     if heat_col:
         heat_col = heat_col[0]
         heat_kits = sorted(df_filtered[heat_col].dropna().astype(str).unique())
-        # Add an "Any/None" option if there are multiple choices
         selected_heat = st.selectbox("Select Heat Kit / Electric Heat", heat_kits)
         df_filtered = df_filtered[df_filtered[heat_col] == selected_heat]
     else:
@@ -153,37 +155,32 @@ with col2:
 
 # Matchups and Pricing Output
 st.markdown("---")
-st.subheader("Matchup Results & Pricing")
+st.subheader("📊 Matchup Results & Pricing")
 
 if df_filtered.empty:
     st.info("No matchups found matching the selected criteria. Try adjusting your selections.")
 else:
-    # If there are multiple rows, let user select a specific matchup ID or row
     if len(df_filtered) > 1:
         st.warning(f"Found {len(df_filtered)} matching matchups. Showing the first match. Use more filters above if needed.")
     
-    # Get the single active matchup row
     matchup_row = df_filtered.iloc[0]
     
     # Display equipment details
-    st.markdown('<div class="card">', unsafe_allowed_html=True)
-    st.markdown("### Equipment Matchup Details")
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown("### 📋 Equipment Matchup Details")
     
-    # Show columns that are not pricing columns
     detail_cols = [c for c in df_filtered.columns if c not in price_cols and not any(c.startswith(f"{p}_") for p in price_cols)]
     
     cols = st.columns(3)
     for idx, col in enumerate(detail_cols):
         with cols[idx % 3]:
-            # Remove deduplication suffix from UI labels
             label = col.split('_')[0] if '_' in col else col
             st.write(f"**{label}:** {matchup_row[col]}")
-    st.markdown('</div>', unsafe_allowed_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
     
     # Display pricing cards
-    st.markdown("### Estimated Margins & Pricing")
+    st.markdown("### 💰 Estimated Margins & Pricing")
     
-    # Resolve duplicated columns back to single values for clean pricing display
     def get_price_value(col_name):
         if col_name in matchup_row:
             return matchup_row[col_name]
@@ -212,7 +209,7 @@ else:
             """, unsafe_allowed_html=True)
 
     # Secondary Pricing Details Row
-    st.markdown("#### Internal Cost Reference")
+    st.markdown("#### 🔍 Internal Cost Reference")
     c_cols = st.columns(4)
     
     costs_to_show = [
