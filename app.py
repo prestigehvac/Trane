@@ -1,178 +1,228 @@
+import streamlit as np
 import streamlit as st
 import pandas as pd
-import numpy as np
 
-# Set Page Config
-st.set_page_config(
-    page_title="Prestige HVAC Quote Helper - Trane Edition",
-    page_icon="https://prestigehvac.com/wp-content/uploads/2021/04/cropped-prestige-hvac-logo-1-32x32.png",
-    layout="wide"
-)
+# Set page config
+st.set_page_config(page_title="Prestige HVAC Quote Helper - Trane Edition", layout="wide")
 
-# Custom CSS for styling (using the correct unsafe_allow_html parameter and removing generic emojis)
+# Custom CSS for styling
 st.markdown("""
 <style>
-    .main {
-        background-color: #f8f9fa;
+    .reportview-container {
+        background: #f0f2f6;
     }
-    .stMetric {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        border-left: 5px solid #E31B23;
-    }
-    .system-card {
+    .card {
         background-color: #ffffff;
         padding: 20px;
         border-radius: 10px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         margin-bottom: 20px;
-        border: 1px solid #e9ecef;
+    }
+    .price-card {
+        background-color: #e8f4f8;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #1f77b4;
+        margin-bottom: 10px;
+    }
+    .price-value {
+        font-size: 24px;
+        font-weight: bold;
+        color: #1f77b4;
+    }
+    .price-label {
+        font-size: 14px;
+        color: #555555;
     }
 </style>
-""", unsafe_allow_html=True)
+""", unsafe_allowed_html=True)
 
-# Helper function to parse sections from the Trane Excel sheet
+# Title
+st.title("Prestige HVAC Quote Helper - Trane Edition")
+
+# Load data
 @st.cache_data
-def load_and_parse_data():
-    file_path = "Trane Matchup 2026.xlsx"
-    df_raw = pd.read_excel(file_path, header=None)
+def load_data():
+    # Load the Excel file
+    # Replace with your actual file path or URL
+    sheet_url = "https://docs.google.com/spreadsheets/d/1aRef-chlSkfAL6IUc7-sNcX3c7JmIgon/export?format=xlsx"
     
-    sections = {}
-    current_section = None
-    headers = None
-    section_rows = []
-    
-    for idx, row in df_raw.iterrows():
-        row_list = [str(val).strip() for val in row.values if pd.notna(val)]
-        if not row_list:
-            continue
-            
-        first_val = str(row.iloc[0]).strip()
-        if "Air Conditioner" in first_val or "Heat Pump" in first_val:
-            if current_section and section_rows:
-                sections[current_section] = pd.DataFrame(section_rows, columns=headers)
-            current_section = first_val
-            headers = None
-            section_rows = []
-            continue
-            
-        if "Ton" in row_list or "Tonnage" in row_list:
-            headers = [str(h).strip() for h in row.values if pd.notna(h)]
-            continue
-            
-        if current_section and headers and len(row_list) >= len(headers) - 2:
-            cleaned_row = [row.iloc[i] for i in range(len(headers))]
-            section_rows.append(cleaned_row)
-            
-    if current_section and section_rows:
-        sections[current_section] = pd.DataFrame(section_rows, columns=headers)
-        
-    return sections
+    xls = pd.ExcelFile(sheet_url)
+    df_dict = {}
+    for sheet in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=sheet)
+        # Strip whitespace from column names
+        df.columns = df.columns.str.strip()
+        df_dict[sheet] = df
+    return df_dict
 
 try:
-    all_sections = load_and_parse_data()
+    data_dict = load_data()
 except Exception as e:
-    st.error(f"Error loading Excel file: {e}")
-    all_sections = {}
+    st.error(f"Error loading data: {e}")
+    st.stop()
 
-# --- SIDEBAR LOGO & FILTERS ---
-st.sidebar.image("https://prestigehvac.com/wp-content/uploads/2021/04/cropped-prestige-hvac-logo-1.png", use_container_width=True)
-st.sidebar.markdown("### **System Configurator**")
+# Available sheets (System Types)
+system_types = list(data_dict.keys())
 
-# 1. System Type Selection
-system_types = list(all_sections.keys())
-selected_system_type = st.sidebar.selectbox(
-    "Select System Type",
-    options=system_types if system_types else ["No data found"]
-)
+# Sidebar Selection
+st.sidebar.header("System Settings")
+selected_system_type = st.sidebar.selectbox("Select System Type", system_types)
 
-# Parse selected dataset
-df_selected = all_sections.get(selected_system_type, pd.DataFrame())
+# Get data for selected system type
+df_selected = data_dict[selected_system_type].copy()
 
-if not df_selected.empty:
-    # Clean up pricing columns to float
-    for col in df_selected.columns:
-        if 'Price' in col or 'Total' in col:
-            df_selected[col] = df_selected[col].astype(str).str.replace('$', '').str.replace(',', '').str.strip()
-            df_selected[col] = pd.to_numeric(df_selected[col], errors='coerce')
+# Ensure we have clean column names and handle duplicates immediately
+df_selected.columns = df_selected.columns.str.strip()
 
-    # Convert Ton to float
-    df_selected['Ton'] = pd.to_numeric(df_selected['Ton'], errors='coerce')
-    df_selected = df_selected.dropna(subset=['Ton'])
+# De-duplicate column names by appending suffixes if duplicates exist
+df_selected.columns = [
+    f"{col}_{i}" if df_selected.columns.tolist().count(col) > 1 else col 
+    for i, col in enumerate(df_selected.columns)
+]
 
-    # 2. Tonnage Selection
-    ton_options = sorted(df_selected['Ton'].unique())
-    selected_ton = st.sidebar.selectbox("Select Tonnage (Tons)", options=ton_options)
+# Clean price columns to ensure they are numeric
+price_cols = [
+    'System Cost', 'Sub-Total', 'Cost - 10% Margin', 'Cost - 15% Margin',
+    'Cost - 20% Margin', 'Price - 30% Margin', 'Price - 35% Margin',
+    'Price - 40% Margin', 'Price - 45% Margin', 'Price - 50% Margin'
+]
 
-    # Filter data
-    filtered_df = df_selected[df_selected['Ton'] == selected_ton]
-
-    # 3. Markup & Pricing Adjustments
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### **Pricing Configuration**")
-    markup_pct = st.sidebar.slider("Markup Percentage (%)", min_value=0, max_value=100, value=30, step=5) / 100.0
-    add_labor = st.sidebar.number_input("Additional Labor / Fees ($)", min_value=0, value=1200, step=100)
-
-    # --- MAIN CONTENT AREA ---
-    # Header featuring the Prestige Logo matching the Amana layout
-    col_header1, col_header2 = st.columns([1, 4])
-    with col_header1:
-        st.image("https://prestigehvac.com/wp-content/uploads/2021/04/cropped-prestige-hvac-logo-1.png", width=150)
-    with col_header2:
-        st.title("Prestige HVAC Quote Helper")
-        st.subheader(f"System: {selected_system_type}")
-
-    if not filtered_df.empty:
-        row = filtered_df.iloc[0]
-
-        # Calculate final cost breakdowns
-        equipment_total = row.get('Total', 0)
-        marked_up_total = equipment_total * (1 + markup_pct)
-        final_price = marked_up_total + add_labor
-
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Equipment Cost (Base)", f"${equipment_total:,.2f}")
-        with col2:
-            st.metric(f"With {int(markup_pct*100)}% Markup", f"${marked_up_total:,.2f}")
-        with col3:
-            st.metric("Final Quote Price", f"${final_price:,.2f}")
-
-        # Specs Layout Card
-        st.markdown('<div class="system-card">', unsafe_allow_html=True)
-        st.markdown("### **System Specifications**")
-        
-        col_s1, col_s2, col_s3 = st.columns(3)
-        with col_s1:
-            st.write(f"**Tonnage:** {row.get('Ton')} Tons")
-            st.write(f"**SEER2:** {row.get('SEER2')}")
-        with col_s2:
-            st.write(f"**Max Amp:** {row.get('Max Amp')}")
-            st.write(f"**Line Size:** {row.get('Line Size')}")
-        with col_s3:
-            st.write(f"**Supplies ID:** #{int(row.get('Supplies#', 0)) if pd.notna(row.get('Supplies#')) else 'N/A'}")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # Equipment Breakdown Cards
-        st.markdown("### **Equipment Breakdown**")
-        col_b1, col_b2, col_b3 = st.columns(3)
-
-        with col_b1:
-            st.info(f"**Outdoor Unit (Condenser)**\n\nModel: `{row.get('Outdoor')}`\n\nBase Price: ${row.get('Price', 0):,.2f}")
-        
-        with col_b2:
-            st.success(f"**Indoor Unit (Furnace/Air Handler)**\n\nModel: `{row.get('Indoor')}`\n\nBase Price: ${row.get('Price.1', 0):,.2f}")
-
-        # Find dynamic third column (Coil w/ orifice, Coil w/ TXV, or Heat Kit)
-        third_col_name = [c for c in filtered_df.columns if 'Coil' in c or 'Heat Kit' in c]
-        if third_col_name:
-            col_label = third_col_name[0]
-            with col_b3:
-                st.warning(f"**Auxiliary Component ({col_label})**\n\nModel: `{row.get(col_label)}`\n\nBase Price: ${row.get('Price.2', 0):,.2f}")
-
+for col in price_cols:
+    if col in df_selected.columns:
+        # Clean single columns safely
+        df_selected[col] = df_selected[col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False)
+        df_selected[col] = pd.to_numeric(df_selected[col], errors='coerce').fillna(0.0)
     else:
-        st.warning("No matches found for the selected Tonnage.")
+        # Handle duplicated columns (e.g., 'System Cost_0', 'System Cost_1') safely
+        matching_cols = [c for c in df_selected.columns if c.startswith(f"{col}_")]
+        for m_col in matching_cols:
+            df_selected[m_col] = df_selected[m_col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False)
+            df_selected[m_col] = pd.to_numeric(df_selected[m_col], errors='coerce').fillna(0.0)
+
+# Main Form
+st.header(f"Configure {selected_system_type}")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    # 1. Size
+    if 'Size (Tons)' in df_selected.columns:
+        sizes = sorted(df_selected['Size (Tons)'].dropna().unique())
+        selected_size = st.selectbox("Select System Size (Tons)", sizes)
+        df_filtered = df_selected[df_selected['Size (Tons)'] == selected_size]
+    elif 'Size' in df_selected.columns:
+        sizes = sorted(df_selected['Size'].dropna().unique())
+        selected_size = st.selectbox("Select System Size", sizes)
+        df_filtered = df_selected[df_selected['Size'] == selected_size]
+    else:
+        st.warning("No 'Size' column found in this sheet.")
+        df_filtered = df_selected.copy()
+
+    # 2. Outdoor Model (if applicable)
+    outdoor_col = [c for c in df_filtered.columns if 'Outdoor' in c or 'OD' in c or 'Condenser' in c]
+    if outdoor_col:
+        outdoor_col = outdoor_col[0]
+        outdoor_models = sorted(df_filtered[outdoor_col].dropna().astype(str).unique())
+        selected_outdoor = st.selectbox("Select Outdoor Unit Model", outdoor_models)
+        df_filtered = df_filtered[df_filtered[outdoor_col] == selected_outdoor]
+    else:
+        selected_outdoor = None
+
+    # 3. Indoor Model (if applicable)
+    indoor_col = [c for c in df_filtered.columns if 'Indoor' in c or 'ID' in c or 'Coil' in c or 'Furnace' in c or 'Air Handler' in c]
+    if indoor_col:
+        indoor_col = indoor_col[0]
+        indoor_models = sorted(df_filtered[indoor_col].dropna().astype(str).unique())
+        selected_indoor = st.selectbox("Select Indoor Unit Model", indoor_models)
+        df_filtered = df_filtered[df_filtered[indoor_col] == selected_indoor]
+    else:
+        selected_indoor = None
+
+with col2:
+    # 4. Heat Kit / Electric Heat (if applicable)
+    heat_col = [c for c in df_filtered.columns if 'Heat Kit' in c or 'Electric Heat' in c or 'KW' in c]
+    if heat_col:
+        heat_col = heat_col[0]
+        heat_kits = sorted(df_filtered[heat_col].dropna().astype(str).unique())
+        # Add an "Any/None" option if there are multiple choices
+        selected_heat = st.selectbox("Select Heat Kit / Electric Heat", heat_kits)
+        df_filtered = df_filtered[df_filtered[heat_col] == selected_heat]
+    else:
+        selected_heat = None
+
+# Matchups and Pricing Output
+st.markdown("---")
+st.subheader("Matchup Results & Pricing")
+
+if df_filtered.empty:
+    st.info("No matchups found matching the selected criteria. Try adjusting your selections.")
 else:
-    st.info("Please select a valid system configuration from the sidebar.")
+    # If there are multiple rows, let user select a specific matchup ID or row
+    if len(df_filtered) > 1:
+        st.warning(f"Found {len(df_filtered)} matching matchups. Showing the first match. Use more filters above if needed.")
+    
+    # Get the single active matchup row
+    matchup_row = df_filtered.iloc[0]
+    
+    # Display equipment details
+    st.markdown('<div class="card">', unsafe_allowed_html=True)
+    st.markdown("### Equipment Matchup Details")
+    
+    # Show columns that are not pricing columns
+    detail_cols = [c for c in df_filtered.columns if c not in price_cols and not any(c.startswith(f"{p}_") for p in price_cols)]
+    
+    cols = st.columns(3)
+    for idx, col in enumerate(detail_cols):
+        with cols[idx % 3]:
+            # Remove deduplication suffix from UI labels
+            label = col.split('_')[0] if '_' in col else col
+            st.write(f"**{label}:** {matchup_row[col]}")
+    st.markdown('</div>', unsafe_allowed_html=True)
+    
+    # Display pricing cards
+    st.markdown("### Estimated Margins & Pricing")
+    
+    # Resolve duplicated columns back to single values for clean pricing display
+    def get_price_value(col_name):
+        if col_name in matchup_row:
+            return matchup_row[col_name]
+        matching = [c for c in matchup_row.index if c.startswith(f"{col_name}_")]
+        if matching:
+            return matchup_row[matching[0]]
+        return 0.0
+
+    p_cols = st.columns(4)
+    
+    margins_to_show = [
+        ('Price - 30% Margin', "30% Margin Price"),
+        ('Price - 35% Margin', "35% Margin Price"),
+        ('Price - 40% Margin', "40% Margin Price"),
+        ('Price - 45% Margin', "45% Margin Price"),
+    ]
+    
+    for idx, (col_name, label) in enumerate(margins_to_show):
+        price_val = get_price_value(col_name)
+        with p_cols[idx]:
+            st.markdown(f"""
+            <div class="price-card">
+                <div class="price-label">{label}</div>
+                <div class="price-value">${price_val:,.2f}</div>
+            </div>
+            """, unsafe_allowed_html=True)
+
+    # Secondary Pricing Details Row
+    st.markdown("#### Internal Cost Reference")
+    c_cols = st.columns(4)
+    
+    costs_to_show = [
+        ('System Cost', "Equipment Cost"),
+        ('Sub-Total', "Job Sub-Total"),
+        ('Cost - 10% Margin', "10% Margin Cost"),
+        ('Cost - 15% Margin', "15% Margin Cost")
+    ]
+    
+    for idx, (col_name, label) in enumerate(costs_to_show):
+        cost_val = get_price_value(col_name)
+        with c_cols[idx]:
+            st.write(f"**{label}:** ${cost_val:,.2f}")
