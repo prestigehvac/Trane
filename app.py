@@ -26,27 +26,28 @@ def load_and_preprocess_data(file_path):
         st.error(f"Could not find the Excel file: '{file_path}' in the current directory.")
         return None
 
-    # Load starting at index row 4 (row 5) where the structured headers reside
+    # Load starting at row index 4 (row 5) where headers reside
     df_headers = pd.read_excel(file_path, sheet_name="Sheet1", header=4)
     return df_headers
 
 df_raw = load_and_preprocess_data(EXCEL_FILE)
 
 if df_raw is not None:
-    # 1. Parse and extract system types from columns safely using right-split
+    # 1. Parse and extract system types from columns safely
     parsed_columns = []
     systems = set()
     
     for col in df_raw.columns:
-        if "/" in str(col):
-            # Split from the right only once to handle slashes like "w/ fixed orifice"
-            parts = str(col).rsplit("/", 1)
+        col_str = str(col).strip()
+        if "/" in col_str:
+            # Split from the right side at the last slash
+            parts = col_str.rsplit("/", 1)
             system_name = parts[0].strip()
             metric_name = parts[1].strip()
             parsed_columns.append((system_name, metric_name, col))
             systems.add(system_name)
         else:
-            parsed_columns.append(("General", str(col).strip(), col))
+            parsed_columns.append(("General", col_str, col))
 
     # Convert systems set to a sorted list
     system_list = sorted(list(systems))
@@ -98,95 +99,126 @@ if df_raw is not None:
         for _, metric, original_col in system_cols:
             sys_df[metric] = df_raw[original_col]
         
-        # Clean any completely empty rows
-        sys_df = sys_df.dropna(subset=["Ton"])
-        
-        # Convert Tonnage to clean strings/floats for matching
-        sys_df["Ton_Display"] = sys_df["Ton"].apply(lambda x: f"{float(x):.1f} Ton" if pd.notnull(x) else "")
-        tonnages = sys_df["Ton_Display"].unique()
+        # Guard against a missing "Ton" column key by finding the closest match
+        ton_col_key = "Ton"
+        if "Ton" not in sys_df.columns:
+            # Fallback search if there is a slight naming or spacing difference
+            for col_name in sys_df.columns:
+                if "ton" in col_name.lower():
+                    ton_col_key = col_name
+                    break
 
-        with col2:
-            selected_ton = st.selectbox(
-                "Select Tonnage",
-                options=tonnages
-            )
-
-        # Filter database by Selected Tonnage
-        matched_row = sys_df[sys_df["Ton_Display"] == selected_ton]
-
-        if not matched_row.empty:
-            row = matched_row.iloc[0]
+        if ton_col_key in sys_df.columns:
+            # Clean any completely empty rows on the tonnage key
+            sys_df = sys_df.dropna(subset=[ton_col_key])
             
-            # Extract models and base cost
-            outdoor_model = row.get("Outdoor", "N/A")
-            indoor_model = row.get("Indoor", "N/A")
-            coil_model = row.get("Coil w/ orifice", "N/A")
-            seer2_rating = row.get("SEER2", "N/A")
-            max_amp = row.get("Max Amp", "N/A")
-            line_size = row.get("Line Size", "N/A")
-            
-            # Extract and parse prices (handling '$' and commas safely)
-            def clean_price(val):
-                if pd.isna(val):
-                    return 0.0
-                val_str = str(val).replace("$", "").replace(",", "").strip()
-                try:
-                    return float(val_str)
-                except ValueError:
-                    return 0.0
+            # Convert Tonnage to clean strings/floats for matching
+            sys_df["Ton_Display"] = sys_df[ton_col_key].apply(lambda x: f"{float(x):.1f} Ton" if pd.notnull(x) and str(x).strip() != "" else "")
+            # Filter out empty display values
+            sys_df = sys_df[sys_df["Ton_Display"] != ""]
+            tonnages = sys_df["Ton_Display"].unique()
 
-            # Reconstruct component and total prices directly from the original DataFrame row
-            orig_row = df_raw.loc[matched_row.index[0]]
-            
-            prices = []
-            for item in system_cols:
-                if item[1] == "Price":
-                    prices.append(clean_price(orig_row[item[2]]))
-            
-            outdoor_cost = prices[0] if len(prices) > 0 else 0.0
-            indoor_cost = prices[1] if len(prices) > 1 else 0.0
-            coil_cost = prices[2] if len(prices) > 2 else 0.0
-            
-            # Use original total column price or sum them
-            distributor_total = clean_price(orig_row[[c[2] for c in system_cols if c[1] == "Total"][0]])
-            if distributor_total == 0.0:
-                distributor_total = outdoor_cost + indoor_cost + coil_cost
-
-            # Calculate Retail Price
-            calculated_retail_price = (distributor_total * markup_multiplier) + labor_material_cost
-
-            st.markdown("---")
-            st.subheader("Available Matchups & Customer Pricing")
-
-            # Layout results
-            res_col1, res_col2 = st.columns(2)
-            
-            with res_col1:
-                st.metric(
-                    label="Estimated Customer Investment", 
-                    value=f"${calculated_retail_price:,.2f}",
-                    help="Calculated as: (Equipment Cost * Multiplier) + Labor & Material Costs"
+            with col2:
+                selected_ton = st.selectbox(
+                    "Select Tonnage",
+                    options=tonnages
                 )
+
+            # Filter database by Selected Tonnage
+            matched_row = sys_df[sys_df["Ton_Display"] == selected_ton]
+
+            if not matched_row.empty:
+                row = matched_row.iloc[0]
                 
-                st.markdown("#### System Specifications")
-                st.write(f"**SEER2 Rating:** {seer2_rating}")
-                st.write(f"**Max Amp Breaker:** {max_amp}")
-                st.write(f"**Refrigerant Line Size:** {line_size}")
+                # Extract models and specifications safely using get fallbacks
+                outdoor_model = row.get("Outdoor", "N/A")
+                indoor_model = row.get("Indoor", "N/A")
+                
+                # Dynamic check for coil name variations in headers
+                coil_col_key = "Coil w/ orifice"
+                for col_name in sys_df.columns:
+                    if "coil" in col_name.lower():
+                        coil_col_key = col_name
+                        break
+                
+                coil_model = row.get(coil_col_key, "N/A")
+                seer2_rating = row.get("SEER2", "N/A")
+                max_amp = row.get("Max Amp", "N/A")
+                line_size = row.get("Line Size", "N/A")
+                
+                # Extract and parse prices (handling '$' and commas safely)
+                def clean_price(val):
+                    if pd.isna(val):
+                        return 0.0
+                    val_str = str(val).replace("$", "").replace(",", "").strip()
+                    try:
+                        return float(val_str)
+                    except ValueError:
+                        return 0.0
 
-            with res_col2:
-                st.markdown("#### Equipment Breakdown")
-                st.info(f"**Outdoor Condenser Model:** `{outdoor_model}`")
-                st.info(f"**Indoor Furnace/Air Handler:** `{indoor_model}`")
-                st.info(f"**Cased Coil:** `{coil_model}`")
+                # Reconstruct component and total prices directly from the original DataFrame row
+                orig_row = df_raw.loc[matched_row.index[0]]
+                
+                prices = []
+                for item in system_cols:
+                    if item[1] == "Price":
+                        prices.append(clean_price(orig_row[item[2]]))
+                
+                outdoor_cost = prices[0] if len(prices) > 0 else 0.0
+                indoor_cost = prices[1] if len(prices) > 1 else 0.0
+                coil_cost = prices[2] if len(prices) > 2 else 0.0
+                
+                # Find the Total column safely
+                total_col_key = None
+                for item in system_cols:
+                    if item[1] == "Total":
+                        total_col_key = item[2]
+                        break
+                
+                distributor_total = 0.0
+                if total_col_key:
+                    distributor_total = clean_price(orig_row[total_col_key])
+                
+                if distributor_total == 0.0:
+                    distributor_total = outdoor_cost + indoor_cost + coil_cost
 
-            # Expandable technical comparison details 
-            with st.expander("Show Distributor Pricing Summary (Internal Use Only)"):
-                st.table(pd.DataFrame({
-                    "Component": ["Outdoor Condenser", "Indoor Unit", "Coil System", "Total Distributor Cost"],
-                    "Model": [outdoor_model, indoor_model, coil_model, "---"],
-                    "Unit Cost": [f"${outdoor_cost:,.2f}", f"${indoor_cost:,.2f}", f"${coil_cost:,.2f}", f"${distributor_total:,.2f}"]
-                }))
+                # Calculate Retail Price
+                calculated_retail_price = (distributor_total * markup_multiplier) + labor_material_cost
+
+                st.markdown("---")
+                st.subheader("Available Matchups & Customer Pricing")
+
+                # Layout results
+                res_col1, res_col2 = st.columns(2)
+                
+                with res_col1:
+                    st.metric(
+                        label="Estimated Customer Investment", 
+                        value=f"${calculated_retail_price:,.2f}",
+                        help="Calculated as: (Equipment Cost * Multiplier) + Labor & Material Costs"
+                    )
+                    
+                    st.markdown("#### System Specifications")
+                    st.write(f"**SEER2 Rating:** {seer2_rating}")
+                    st.write(f"**Max Amp Breaker:** {max_amp}")
+                    st.write(f"**Refrigerant Line Size:** {line_size}")
+
+                with res_col2:
+                    st.markdown("#### Equipment Breakdown")
+                    st.info(f"**Outdoor Condenser Model:** `{outdoor_model}`")
+                    st.info(f"**Indoor Furnace/Air Handler:** `{indoor_model}`")
+                    st.info(f"**Cased Coil:** `{coil_model}`")
+
+                # Expandable technical comparison details 
+                with st.expander("Show Distributor Pricing Summary (Internal Use Only)"):
+                    st.table(pd.DataFrame({
+                        "Component": ["Outdoor Condenser", "Indoor Unit", "Coil System", "Total Distributor Cost"],
+                        "Model": [outdoor_model, indoor_model, coil_model, "---"],
+                        "Unit Cost": [f"${outdoor_cost:,.2f}", f"${indoor_cost:,.2f}", f"${coil_cost:,.2f}", f"${distributor_total:,.2f}"]
+                    }))
+            else:
+                st.warning("No pricing rows found matching this tonnage configuration.")
         else:
-            st.warning("No pricing rows found matching this tonnage configuration.")
+            st.error("Could not locate a Tonnage ('Ton') column for the selected system inside your Excel file.")
     else:
         st.error("No valid multi-level system headers matched your Trane matchup dataset. Please check the Excel format.")
