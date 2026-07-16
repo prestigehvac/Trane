@@ -12,7 +12,6 @@ def get_theme_color(key, default):
                     if "=" in line:
                         k, v = line.split("=", 1)
                         if k.strip() == key:
-                            # Clean up quotes and whitespace from the color hex
                             return v.strip().strip('"').strip("'")
         except Exception:
             pass
@@ -23,7 +22,7 @@ primary_color = get_theme_color("primaryColor", "#FF4B4B")
 text_color = get_theme_color("textColor", "#FFFFFF")
 background_color = get_theme_color("backgroundColor", "#1E1E2F")
 
-# Custom style blocks that adapt dynamically to your config.toml palette
+# Styling blocks mapped to config.toml
 st.markdown(f"""
     <style>
     .stApp {{
@@ -42,32 +41,54 @@ st.markdown(f"""
     </style>
 """, unsafe_allow_html=True)
 
-# Logo
+# Logo & Title
 st.image("https://prestigeheatingandair.com/wp-content/uploads/2021/08/logo.png", width=150)
 st.title("Prestige Quick Quote Tool - Trane Edition")
 
-# File path
 file_path = "Trane Matchup 2026.xlsx"
+
+# Define row ranges for each specific system type in Sheet1
+SYSTEM_MAPPING = {
+    "Air Conditioner with 80% AFUE Gas Furnace and Cased Coil R-454b 14.3 SEER2 w/ fixed orifice": {
+        "skiprows": 4, 
+        "nrows": 8,
+        "coil_header": "Coil w/ orifice"
+    },
+    "Air Conditioner with Air Handler and Heat Kit R-454b 14.3 SEER2": {
+        "skiprows": 15, 
+        "nrows": 8,
+        "coil_header": "Coil w/ TXV"
+    },
+    "Heat Pump with Air Handler and Heat Kit R-454b 14.3 SEER2": {
+        "skiprows": 25, 
+        "nrows": 8,
+        "coil_header": "Heat Kit"
+    }
+}
 
 if not os.path.exists(file_path):
     st.error(f"Error: '{file_path}' not found. Please ensure the file is in the repository.")
 else:
-    # Load Excel File
-    xls = pd.ExcelFile(file_path)
-    sheet_names = xls.sheet_names
+    # Dropdown to select the system type
+    selected_system = st.selectbox("Select System Type", list(SYSTEM_MAPPING.keys()))
 
-    # Select Sheet
-    selected_sheet = st.selectbox("Select Equipment Type", sheet_names)
-
-    if selected_sheet:
-        # Read starting from row 5 (0-indexed 4) to skip title blocks
-        df = pd.read_excel(xls, sheet_name=selected_sheet, header=4)
+    if selected_system:
+        cfg = SYSTEM_MAPPING[selected_system]
         
-        # Clean column names
+        # Load the targeted table block from Sheet1
+        df = pd.read_excel(
+            file_path, 
+            sheet_name="Sheet1", 
+            header=0, 
+            skiprows=cfg["skiprows"], 
+            nrows=cfg["nrows"]
+        )
+        
+        # Clean up column names
         df.columns = df.columns.str.strip()
         df_clean = df.dropna(how='all')
 
-        # Find columns by suffix to handle merged/complex headers
+        # Clean mapping function for specific header columns
         def find_col(suffix):
             for col in df_clean.columns:
                 if col.endswith(suffix) or col == suffix:
@@ -78,17 +99,11 @@ else:
         seer_col = find_col("SEER2")
         outdoor_col = find_col("Outdoor")
         indoor_col = find_col("Indoor")
-        coil_col = find_col("Coil w/ orifice") or find_col("Coil w/ TXV") or find_col("Coil")
+        coil_col = find_col(cfg["coil_header"])
         total_col = find_col("Total")
 
-        # Fallbacks
-        if not ton_col:
-            ton_col = [c for c in df_clean.columns if "ton" in c.lower()][0] if [c for c in df_clean.columns if "ton" in c.lower()] else None
-        if not total_col:
-            total_col = [c for c in df_clean.columns if "total" in c.lower()][-1] if [c for c in df_clean.columns if "total" in c.lower()] else None
-
         if ton_col and total_col:
-            # Extract unique tonnage options
+            # Drop down for Ton options
             raw_vals = df_clean[ton_col].dropna().unique()
             ton_values = sorted([float(val) for val in raw_vals if isinstance(val, (int, float)) or str(val).replace('.', '', 1).isdigit()])
 
@@ -114,15 +129,17 @@ else:
                             with col1:
                                 st.write(f"**Outdoor Unit:** {outdoor}")
                                 st.write(f"**Indoor Unit:** {indoor}")
-                                st.write(f"**Coil:** {coil}")
+                                st.write(f"**{cfg['coil_header']}:** {coil}")
                             with col2:
                                 st.write(f"**SEER2:** {seer}")
                                 if isinstance(total_price, (int, float)):
                                     st.subheader(f"Total: ${total_price:,.2f}")
+                                elif isinstance(total_price, str) and "$" in total_price:
+                                    st.subheader(f"Total: {total_price.strip()}")
                                 else:
-                                    st.subheader(f"Total: {total_price}")
+                                    st.subheader(f"Total: ${total_price}")
                             st.markdown("---")
                 else:
                     st.warning("No matched options found for this tonnage.")
         else:
-            st.error("Could not map the Excel columns. Please check your sheet headers.")
+            st.error("Could not map the Excel columns. Check the structure of the Sheet.")
