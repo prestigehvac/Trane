@@ -3,13 +3,18 @@ import pandas as pd
 
 st.set_page_config(page_title="Prestige Quick Quote Tool - Trane Edition", layout="centered")
 
-# Center and shrink the logo by 40% (200px -> 120px)
-logo_col1, logo_col2, logo_col3 = st.columns([1, 1, 1])
-with logo_col2:
-    st.image("https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg", width=120)
+# Perfect centering for the logo and shrinking it to 120px
+st.markdown(
+    """
+    <div style="display: flex; justify-content: center;">
+        <img src="https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg" width="120">
+    </div>
+    """,
+    allow_unsafe_html=True
+)
 
-# Center the title text
-st.markdown("<h1 style='text-align: center;'>Prestige Quick Quote Tool - Trane Edition</h1>", unsafe_html=True)
+# Centering the title text cleanly
+st.markdown("<h1 style='text-align: center;'>Prestige Quick Quote Tool - Trane Edition</h1>", allow_unsafe_html=True)
 
 # 1. Load and parse the Excel file
 @st.cache_data
