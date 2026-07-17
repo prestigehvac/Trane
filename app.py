@@ -22,7 +22,7 @@ uploaded_file = st.sidebar.file_uploader("Upload New Distributor Pricing Spreads
 
 st.sidebar.header("Pricing Calculator")
 markup_multiplier = st.sidebar.slider("Markup Multiplier", min_value=1.00, max_value=3.00, value=1.80, step=0.05)
-labor_material_cost = st.sidebar.number_input("Labor & Material Cost ($)", min_value=0.0, value=1700.0, step=100.0)
+labor_material_cost = st.sidebar.number_input("Labor & Material Cost ($)", min_value=0.0, value=1700.0, step=1.0)
 
 # 1. Load and parse the Excel file
 @st.cache_data
@@ -95,7 +95,7 @@ try:
     
     # Final total investment display block
     st.markdown("---")
-    st.subheader("💳 Final Pricing")
+    st.subheader("Final Pricing")
     inv_col1, inv_col2 = st.columns(2)
     with inv_col1:
         st.write(f"Marked Up Equipment: `${marked_up_equipment:,.2f}`")
