@@ -10,7 +10,7 @@ st.markdown(
         <img src="https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg" width="120">
     </div>
     """,
-    allow_unsafe_html=True
+    unsafe_allow_html=True
 )
 
 # Centering the title text cleanly
