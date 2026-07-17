@@ -1,7 +1,11 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="Prestige Quick Quote Tool - Trane Edition", layout="centered")
+st.set_page_config(
+    page_title="Prestige Quick Quote Tool - Trane Edition", 
+    layout="centered",
+    page_icon="https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg"
+)
 
 # Perfect centering for the logo and shrinking it to 120px
 st.markdown(
