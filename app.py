@@ -93,9 +93,14 @@ try:
         st.markdown(f"**Line Size:** {matched_row.get('Line Size', 'N/A')}")
         
     with col2:
-        # Format total cost nicely
-        total_val = matched_row.get('Total', 'N/A')
-        st.metric(label="Total System Cost", value=f"{total_val}")
+        # Format total cost nicely to avoid floating-point extension errors
+        total_val = matched_row.get('Total', 0)
+        try:
+            formatted_total = f"${float(total_val):,.2f}"
+        except (ValueError, TypeError):
+            formatted_total = str(total_val)
+            
+        st.metric(label="Total System Cost", value=formatted_total)
     
     st.markdown("### Component Breakdown")
     
@@ -121,11 +126,18 @@ try:
     indoor_price = matched_row.iloc[prices[1]] if len(prices) > 1 else "N/A"
     third_price = matched_row.iloc[prices[2]] if len(prices) > 2 else "N/A"
     
+    # Helper to clean up component prices in the breakdown table too
+    def format_price(val):
+        try:
+            return f"${float(val):,.2f}"
+        except (ValueError, TypeError):
+            return str(val)
+
     # Display details in a structured table
     breakdown_data = {
         "Component": ["Outdoor Unit", "Indoor Unit", third_component_label],
         "Model Number": [matched_row[outdoor_col], matched_row[indoor_col], matched_row[third_col]],
-        "Price": [outdoor_price, indoor_price, third_price]
+        "Price": [format_price(outdoor_price), format_price(indoor_price), format_price(third_price)]
     }
     
     st.table(pd.DataFrame(breakdown_data))
