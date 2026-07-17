@@ -3,8 +3,13 @@ import pandas as pd
 
 st.set_page_config(page_title="Prestige Quick Quote Tool - Trane Edition", layout="centered")
 
-st.image("https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg", width=200) # Optional: uses your web logo if available
-st.title("Prestige Quick Quote Tool - Trane Edition")
+# Center and shrink the logo by 40% (200px -> 120px)
+logo_col1, logo_col2, logo_col3 = st.columns([1, 1, 1])
+with logo_col2:
+    st.image("https://prestigehvac.com/wp-content/uploads/2026/06/prestige-logo-circle-1.jpg", width=120)
+
+# Center the title text
+st.markdown("<h1 style='text-align: center;'>Prestige Quick Quote Tool - Trane Edition</h1>", unsafe_html=True)
 
 # 1. Load and parse the Excel file
 @st.cache_data
