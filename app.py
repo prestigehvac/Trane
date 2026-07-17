@@ -22,11 +22,18 @@ st.markdown("<h1 style='text-align: center;'>Prestige Quick Quote Tool - Trane E
 
 # --- Sidebar Admin & Pricing Parameters ---
 st.sidebar.header("⚙️ Admin Controls")
-uploaded_file = st.sidebar.file_uploader("Upload New Distributor Pricing Spreadsheet", type=["xlsx"])
 
-st.sidebar.header("Pricing Calculator")
-markup_multiplier = st.sidebar.slider("Markup Multiplier", min_value=1.00, max_value=3.00, value=1.80, step=0.05)
-labor_material_cost = st.sidebar.number_input("Labor & Material Cost ($)", min_value=0.0, value=1700.0, step=1.0)
+# Simple password protection
+admin_password = st.sidebar.text_input("Enter Admin Password", type="password")
+
+# Only show the file uploader if the password is correct
+if admin_password == "Pr3st1g375098":
+    uploaded_file = st.sidebar.file_uploader("Upload New Distributor Pricing Spreadsheet", type=["xlsx"])
+    st.sidebar.success("Access Granted!")
+else:
+    uploaded_file = None
+    if admin_password: # Only show error if they actually typed something wrong
+        st.sidebar.error("Incorrect Password")
 
 # 1. Load and parse the Excel file
 @st.cache_data
