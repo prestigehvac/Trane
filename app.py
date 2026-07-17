@@ -14,7 +14,7 @@ st.markdown(
 )
 
 # Centering the title text cleanly
-st.markdown("<h1 style='text-align: center;'>Prestige Quick Quote Tool - Trane Edition</h1>", allow_unsafe_html=True)
+st.markdown("<h1 style='text-align: center;'>Prestige Quick Quote Tool - Trane Edition</h1>", unsafe_allow_html=True)
 
 # 1. Load and parse the Excel file
 @st.cache_data
